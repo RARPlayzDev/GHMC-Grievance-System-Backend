@@ -1,6 +1,6 @@
 # GHMC NagarSeva — Grievance Management Platform (Backend API)
 
-![GHMC Logo](https://upload.wikimedia.org/wikipedia/en/b/b3/Greater_Hyderabad_Municipal_Corporation_logo.png)
+![GHMC Logo](https://www.siasat.com/wp-content/uploads/2021/03/GHMCm.jpg)
 
 A production-ready municipal grievance platform for the Greater Hyderabad Municipal Corporation (GHMC). This backend serves as a high-performance "collapsed monolith" providing 15+ API modules for citizen complaints, officer queue management, and automated AI governance.
 
