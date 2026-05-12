@@ -1,0 +1,465 @@
+================================================================================
+  GHMC GRIEVANCE PLATFORM — FRONTEND-BACKEND INTEGRATION GUIDE
+  For the person merging frontend and backend together
+================================================================================
+
+TABLE OF CONTENTS
+─────────────────
+1. Quick Start (Get Running in 5 Minutes)
+2. Architecture Overview
+3. API Base URL & Auth Setup
+4. Complete API Endpoint Reference
+5. Authentication Flow
+6. How to Call Each Endpoint (with code examples)
+7. Real-time Subscriptions (Supabase Realtime)
+8. File Uploads (Photos)
+9. Offline Sync
+10. Phase-Based Feature Toggling
+11. Environment Variables for Frontend
+12. Common Gotchas & Troubleshooting
+
+
+================================================================================
+1. QUICK START — GET RUNNING IN 5 MINUTES
+================================================================================
+
+STEP 1: Clone and install backend
+    cd services/api
+    npm install
+
+STEP 2: Set up environment
+    cp ../../.env.example .env
+    # Fill in your Supabase, Groq, and Upstash credentials
+
+STEP 3: Set up Supabase database
+    npx supabase init
+    npx supabase db push          # Applies 001_initial_schema.sql
+    # Then run seed files in order:
+    psql $DATABASE_URL -f ../../supabase/seed/demo-wards.sql
+    psql $DATABASE_URL -f ../../supabase/seed/demo-officers.sql
+    psql $DATABASE_URL -f ../../supabase/seed/demo-contractors.sql
+    psql $DATABASE_URL -f ../../supabase/seed/monsoon-calendar.sql
+
+STEP 4: Create demo users in Supabase Auth
+    Go to Supabase Dashboard > Authentication > Users
+    Create users with emails like:
+      officer1@ghmc.demo (password: demo123456)
+      supervisor1@ghmc.demo (password: demo123456)
+      admin@ghmc.demo (password: demo123456)
+    Copy each user's UUID and update the supabase_user_id in demo-officers.sql
+
+STEP 5: Start the backend
+    npm run dev
+    # Server starts at http://localhost:3000
+    # Test: curl http://localhost:3000/health
+
+STEP 6: Point your frontend at the backend
+    In your frontend .env:
+      VITE_API_URL=http://localhost:3000
+      VITE_SUPABASE_URL=https://your-project.supabase.co
+      VITE_SUPABASE_ANON_KEY=your-anon-key
+
+
+================================================================================
+2. ARCHITECTURE OVERVIEW
+================================================================================
+
+                    ┌─── Frontend Apps (Vite + React) ───┐
+                    │                                     │
+                    │  citizen-pwa     → Anonymous access  │
+                    │  officer-app     → Officer JWT       │
+                    │  supervisor-dash → Supervisor JWT    │
+                    │  admin-panel     → Admin JWT         │
+                    └────────────┬────────────────────────┘
+                                 │
+                          HTTPS + Bearer JWT
+                                 │
+                    ┌────────────▼────────────────────────┐
+                    │  Express API (http://localhost:3000) │
+                    │                                      │
+                    │  /api/v1/complaints  → PUBLIC         │
+                    │  /api/v1/officers    → AUTH REQUIRED   │
+                    │  /api/v1/dashboard   → AUTH REQUIRED   │
+                    │  /api/admin/*        → ADMIN ONLY      │
+                    └────────────┬────────────────────────┘
+                                 │
+                    ┌────────────▼────────────────────────┐
+                    │  Supabase (DB + Auth + Storage)      │
+                    │  Groq API (AI inference)             │
+                    │  Upstash Redis (rate limiting)       │
+                    └─────────────────────────────────────┘
+
+KEY RULE: Frontend NEVER talks to Supabase DB directly for writes.
+          All mutations go through the Express API.
+          Frontend CAN use Supabase Auth directly for login/logout.
+          Frontend CAN use Supabase Realtime for live updates.
+
+
+================================================================================
+3. API BASE URL & AUTH SETUP
+================================================================================
+
+BASE URL:
+  Development:  http://localhost:3000
+  Production:   https://ghmc-api.onrender.com
+
+AUTH HEADER FORMAT:
+  Authorization: Bearer <supabase-access-token>
+
+HOW TO GET THE TOKEN (in frontend):
+  import { createClient } from '@supabase/supabase-js';
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Login
+  const { data } = await supabase.auth.signInWithPassword({
+    email: 'officer1@ghmc.demo',
+    password: 'demo123456',
+  });
+
+  // Get token for API calls
+  const token = data.session.access_token;
+
+  // Use in API calls
+  const response = await fetch(`${API_URL}/api/v1/officers/queue`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+
+
+================================================================================
+4. COMPLETE API ENDPOINT REFERENCE
+================================================================================
+
+  ┌──────────────────────────────────────────────────────────────────────┐
+  │ PUBLIC ENDPOINTS (no auth required)                                  │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │ GET    /health                         → Health check                │
+  │ GET    /api/v1/config/phase            → Current phase config        │
+  │ POST   /api/v1/complaints              → File a complaint           │
+  │ GET    /api/v1/complaints/:id          → Get complaint details       │
+  │ POST   /api/v1/complaints/sync         → Sync offline complaints    │
+  │ POST   /api/v1/complaints/:id/challenge→ Citizen challenge closure   │
+  │ GET    /api/v1/routing/wards           → List all wards              │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │ OFFICER ENDPOINTS (Bearer token required, role: OFFICER)             │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │ GET    /api/v1/officers/queue          → Get my complaint queue      │
+  │ POST   /api/v1/officers/:id/assign     → Assign complaint to me      │
+  │ POST   /api/v1/officers/:id/start      → Start resolution            │
+  │ POST   /api/v1/complaints/:id/close    → Close with after-photo      │
+  │ POST   /api/v1/complaints/:id/ai-categorize → Re-categorize via AI  │
+  │ POST   /api/v1/complaints/:id/manual-categorize → Manual override    │
+  │ POST   /api/v1/routing/dispute         → Dispute ward routing        │
+  │ POST   /api/v1/contractors/nonperformance → Log contractor failure   │
+  │ GET    /api/v1/digest                  → Get ward morning digest      │
+  │ GET    /api/v1/disputes/my-disputes    → My routing disputes         │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │ SUPERVISOR ENDPOINTS (role: SUPERVISOR)                              │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │ GET    /api/v1/dashboard/stats         → Overview statistics          │
+  │ GET    /api/v1/dashboard/officers      → Officer performance          │
+  │ GET    /api/v1/dashboard/contractors   → Contractor performance       │
+  │ GET    /api/v1/dashboard/departments   → Department performance       │
+  │ GET    /api/v1/fraud                   → Fraud scores list            │
+  │ GET    /api/v1/fraud/officer/:id       → Officer fraud history        │
+  │ GET    /api/v1/chronic-sites           → Chronic sites list           │
+  │ GET    /api/v1/contractors/:id/scorecard→ Contractor scorecard        │
+  │ GET    /api/v1/disputes/heatmap        → Routing error heatmap        │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │ ADMIN ENDPOINTS (role: ADMIN, IT_HEAD, PIO, etc.)                    │
+  ├──────────────────────────────────────────────────────────────────────┤
+  │ POST   /api/v1/chronic-sites/detect    → Run chronic site detection  │
+  │ POST   /api/v1/complaints/auto-resolve → Auto-resolve expired        │
+  │ GET    /api/v1/rti/:complaint_id       → Generate RTI package        │
+  │ GET    /api/v1/rti                     → List RTI requests            │
+  │ POST   /api/v1/contractors             → Create contractor            │
+  │ GET    /api/admin/model-governance     → Model governance logs        │
+  │ POST   /api/admin/model-governance/request → Request retraining      │
+  │ POST   /api/admin/model-governance/:id/approve → Approve retrain     │
+  │ POST   /api/admin/model-governance/:id/rollback → Rollback model     │
+  │ GET    /api/admin/gis/wards            → List wards (GIS)             │
+  │ PUT    /api/admin/gis/wards/:id/boundary → Update ward boundary      │
+  │ GET    /api/admin/gis/wards/:id/stats  → Ward statistics              │
+  └──────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+5. AUTHENTICATION FLOW
+================================================================================
+
+CITIZEN (citizen-pwa):
+  - No login required
+  - POST /api/v1/complaints works without Authorization header
+  - GET /api/v1/complaints/:id works without auth (public tracking)
+
+OFFICER (officer-app):
+  1. Login via Supabase Auth:
+       const { data } = await supabase.auth.signInWithPassword({
+         email: 'officer1@ghmc.demo',
+         password: 'demo123456',
+       });
+  2. Store the session — Supabase auto-refreshes tokens
+  3. Use data.session.access_token in all API calls
+  4. The backend verifies the JWT, looks up the officer record,
+     and attaches { officer_id, ward_id, role, zone_id } to the request
+
+SUPERVISOR / ADMIN:
+  - Same flow as officer, different email/role
+  - The backend checks the role from the officers table
+  - Role determines which endpoints are accessible
+
+
+================================================================================
+6. HOW TO CALL EACH ENDPOINT (code examples)
+================================================================================
+
+── FILE A COMPLAINT (citizen, no auth) ──
+
+  const formData = new FormData();
+  formData.append('filed_location', JSON.stringify({ lat: 17.385, lng: 78.486 }));
+  formData.append('category', 'ROADS');
+  formData.append('description', 'Large pothole on main road near bus stop');
+  formData.append('source_channel', 'PWA');
+  // Attach photos (up to 3)
+  formData.append('photos', photoFile1);
+  formData.append('photos', photoFile2);
+
+  const res = await fetch(`${API_URL}/api/v1/complaints`, {
+    method: 'POST',
+    body: formData,
+    // Note: Do NOT set Content-Type — browser sets it with boundary
+  });
+  const complaint = await res.json();
+  // complaint.id → use for tracking
+
+
+── GET OFFICER QUEUE ──
+
+  const res = await fetch(`${API_URL}/api/v1/officers/queue?sort_by=priority`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  const { complaints, queue_length, estimated_workload_hours } = await res.json();
+
+
+── CLOSE A COMPLAINT (with after-photo) ──
+
+  const formData = new FormData();
+  formData.append('after_photo', afterPhotoFile);
+  formData.append('closure_location', JSON.stringify({ lat: 17.385, lng: 78.486 }));
+  formData.append('notes', 'Pothole filled with asphalt');
+
+  const res = await fetch(`${API_URL}/api/v1/complaints/${complaintId}/close`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+    body: formData,
+  });
+  const { status, verification_score } = await res.json();
+
+
+── CITIZEN CHALLENGE ──
+
+  const res = await fetch(`${API_URL}/api/v1/complaints/${complaintId}/challenge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reason: 'The pothole is still there, not fixed' }),
+  });
+
+
+── GET DASHBOARD STATS ──
+
+  const res = await fetch(`${API_URL}/api/v1/dashboard/stats`, {
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+
+
+================================================================================
+7. REAL-TIME SUBSCRIPTIONS (Supabase Realtime)
+================================================================================
+
+For the officer queue to update in real-time when new complaints arrive:
+
+  import { createClient } from '@supabase/supabase-js';
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // Subscribe to complaints in my ward
+  const channel = supabase
+    .channel('ward-complaints')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'complaints',
+        filter: `ward_id=eq.${myWardId}`,
+      },
+      (payload) => {
+        console.log('New complaint:', payload.new);
+        // Refresh the queue
+        fetchQueue();
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'complaints',
+        filter: `ward_id=eq.${myWardId}`,
+      },
+      (payload) => {
+        console.log('Complaint updated:', payload.new);
+        // Update the specific complaint in local state
+      }
+    )
+    .subscribe();
+
+  // Cleanup
+  return () => supabase.removeChannel(channel);
+
+
+================================================================================
+8. FILE UPLOADS (Photos)
+================================================================================
+
+  - Complaint photos: Send as multipart/form-data with field name "photos"
+  - Closure photo: Send as multipart/form-data with field name "after_photo"
+  - Max file size: 5MB per file
+  - Max files: 3 per complaint
+  - Accepted types: image/jpeg, image/png, image/webp
+  - The API returns signed URLs (24-hour expiry) in the response
+  - TIP: Compress to WebP on the client before uploading:
+
+    async function compressToWebP(file) {
+      const bitmap = await createImageBitmap(file);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.min(bitmap.width, 1920);
+      canvas.height = Math.min(bitmap.height, 1920);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      return new Promise((resolve) => {
+        canvas.toBlob(resolve, 'image/webp', 0.85);
+      });
+    }
+
+
+================================================================================
+9. OFFLINE SYNC
+================================================================================
+
+  When the app comes back online after filing complaints offline:
+
+  const offlineComplaints = getFromIndexedDB(); // Your offline store
+
+  const res = await fetch(`${API_URL}/api/v1/complaints/sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      complaints: offlineComplaints,
+      device_id: getDeviceId(),
+    }),
+  });
+
+  const { synced, duplicates, conflicts } = await res.json();
+  // synced: number of new complaints created
+  // duplicates: number auto-bundled with existing complaints
+  // conflicts: array of complaints that couldn't be synced
+
+
+================================================================================
+10. PHASE-BASED FEATURE TOGGLING
+================================================================================
+
+  The backend exposes the current phase config:
+
+  const res = await fetch(`${API_URL}/api/v1/config/phase`);
+  const config = await res.json();
+
+  // config = {
+  //   current_phase: 3,
+  //   features: {
+  //     ai_categorization: true,
+  //     photo_diff: true,
+  //     fraud_scoring: true,
+  //     surge_forecast: true,
+  //     priority_queue: true,
+  //     chronic_sites: true,
+  //     accountability_dashboard: false,  // Phase 4
+  //     rti_packaging: false,              // Phase 4
+  //     community_verifiers: false,        // Phase 4
+  //     ward_digest: false,                // Phase 5
+  //     model_governance: false,           // Phase 5
+  //   }
+  // }
+
+  USE THIS to conditionally render UI components:
+  - Hide AI Confidence Bar when ai_categorization is false
+  - Hide Photo Diff UI when photo_diff is false
+  - Show [DEMO MODE] chip on deferred integrations
+
+
+================================================================================
+11. ENVIRONMENT VARIABLES FOR FRONTEND
+================================================================================
+
+  All frontend apps need these in their .env:
+
+  VITE_API_URL=http://localhost:3000           # Backend API URL
+  VITE_SUPABASE_URL=https://xxx.supabase.co    # Supabase project URL
+  VITE_SUPABASE_ANON_KEY=eyJhbG...             # Supabase anon key (public)
+
+  NEVER put SUPABASE_SERVICE_ROLE_KEY in frontend code.
+
+
+================================================================================
+12. COMMON GOTCHAS & TROUBLESHOOTING
+================================================================================
+
+  Q: I get 401 Unauthorized on officer endpoints
+  A: Make sure the user exists in BOTH Supabase Auth AND the officers table.
+     The backend looks up the officer by supabase_user_id. If there's no
+     matching row in officers, you get 403.
+
+  Q: POST /api/v1/complaints returns 429
+  A: Rate limit hit. Each device fingerprint is limited to 10 complaints/hour.
+     For testing, use different fingerprints or wait.
+
+  Q: Photos aren't showing
+  A: Photos are stored in Supabase Storage. The API returns signed URLs that
+     expire after 24 hours. Always use the URLs from the API response, not
+     raw storage paths.
+
+  Q: Real-time updates aren't working
+  A: Make sure Supabase Realtime is enabled in your project settings.
+     Check that you're filtering by the correct ward_id.
+
+  Q: I get CORS errors
+  A: Add your frontend URL to ALLOWED_ORIGINS in the backend .env:
+     ALLOWED_ORIGINS=http://localhost:5173,http://localhost:5174
+
+  Q: AI categorization isn't working
+  A: Check GROQ_API_KEY is set. Check the phase — AI categorization only
+     activates in Phase 2+. Check GHMC_CURRENT_PHASE in .env.
+
+  Q: How do I test as different roles?
+  A: Create multiple Supabase Auth users, each mapped to a different officer
+     in the officers table. Log in as each to test role-based access.
+
+  Q: How do I know which status transitions are valid?
+  A: See the state machine:
+     NEW → ROUTED → ASSIGNED → IN_PROGRESS → PENDING_VERIFICATION
+     → PENDING_CITIZEN_VERIFICATION → RESOLVED
+     IN_PROGRESS → MULTI_OWNER_BLOCKED (if waiting on other dept)
+     PENDING_CITIZEN_VERIFICATION → REOPENED (if citizen disputes)
+     REOPENED → ESCALATED (if disputed 3+ times)
+
+  Q: What's the [DEMO MODE] chip?
+  A: Features like SMS, WhatsApp, and IMD API are not live-connected in MVP.
+     The backend logs these as "deferred" events. Show a [DEMO MODE] chip
+     in the UI next to these features. Check DEMO_MODE env var.
+
+
+================================================================================
+  END OF INTEGRATION GUIDE
+  For questions, check the 6 spec documents in the project root.
+================================================================================

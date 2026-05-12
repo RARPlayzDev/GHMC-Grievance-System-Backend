@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: ghmc-api
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: cd services/api && npm install && npm run build
+    startCommand: cd services/api && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: GHMC_CURRENT_PHASE
+        value: "3"
+      - key: DEMO_MODE
+        value: "true"
+      - key: PORT
+        value: "3000"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_TOKEN
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://ghmc-citizen.vercel.app,https://ghmc-officer.vercel.app,https://ghmc-supervisor.vercel.app,https://ghmc-admin.vercel.app"
+      - key: STORAGE_PROVIDER
+        value: supabase
+      - key: SUPABASE_STORAGE_BUCKET
+        value: complaint-photos
+      - key: SMS_PROVIDER
+        value: none
+      - key: WHATSAPP_PROVIDER
+        value: none
+      - key: LOG_LEVEL
+        value: info
