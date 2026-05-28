@@ -4,9 +4,9 @@ import Header from './components/Header';
 import './i18n';
 
 // Lazy load pages for better performance
-const CitizenPortal = React.lazy(() => import('./pages/CitizenPortal'));
-const OfficerLogin = React.lazy(() => import('./pages/OfficerLogin'));
-const OfficerDashboard = React.lazy(() => import('./pages/OfficerDashboard'));
+const CitizenPortal = React.lazy(() => import('./pages/CitizenPortal.tsx'));
+const OfficerLogin = React.lazy(() => import('./pages/OfficerLogin.tsx'));
+const OfficerDashboard = React.lazy(() => import('./pages/OfficerDashboard.tsx'));
 
 export default function App() {
   return (
