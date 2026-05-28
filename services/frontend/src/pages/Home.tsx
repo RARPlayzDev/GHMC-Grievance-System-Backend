@@ -1,9 +1,7 @@
 import { Link } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import { ArrowRight, ShieldCheck, MapPin, Clock, Smartphone } from 'lucide-react';
 
 export default function Home() {
-  const { t } = useTranslation();
 
   return (
     <div className="bg-white">
