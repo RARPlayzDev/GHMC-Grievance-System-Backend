@@ -1,10 +1,6 @@
-import React from 'react';
-import { useTranslation } from 'react-i18next';
 import { Lock } from 'lucide-react';
 
 export default function OfficerLogin() {
-  const { t } = useTranslation();
-
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 bg-white p-8 sm:p-10 rounded-2xl shadow-sm ring-1 ring-slate-900/5">
