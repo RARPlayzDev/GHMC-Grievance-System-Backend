@@ -2,6 +2,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import LanguageSelector from './LanguageSelector';
 
+import { ShieldCheck } from 'lucide-react';
+
 export default function Header() {
   const { t } = useTranslation();
   const location = useLocation();
@@ -14,8 +16,8 @@ export default function Header() {
         <div className="flex justify-between items-center h-16">
           <div className="flex items-center">
             <Link to="/" className="flex items-center space-x-3 group">
-              <div className="w-9 h-9 bg-primary-600 rounded-xl flex items-center justify-center shadow-sm group-hover:bg-primary-700 transition-colors">
-                <span className="text-white font-bold text-lg leading-none">G</span>
+              <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center shadow-sm group-hover:bg-primary-700 transition-colors">
+                <ShieldCheck className="text-white w-6 h-6" />
               </div>
               <div>
                 <h1 className="font-semibold text-slate-900 leading-tight">GHMC Grievance</h1>

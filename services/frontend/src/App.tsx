@@ -4,6 +4,7 @@ import Header from './components/Header';
 import './i18n';
 
 // Lazy load pages for better performance
+const Home = React.lazy(() => import('./pages/Home.tsx'));
 const CitizenPortal = React.lazy(() => import('./pages/CitizenPortal.tsx'));
 const OfficerLogin = React.lazy(() => import('./pages/OfficerLogin.tsx'));
 const OfficerDashboard = React.lazy(() => import('./pages/OfficerDashboard.tsx'));
@@ -16,7 +17,8 @@ export default function App() {
         <main className="flex-grow">
           <Suspense fallback={<div className="flex items-center justify-center min-h-[50vh]"><div className="w-8 h-8 border-4 border-primary-600 border-t-transparent rounded-full animate-spin"></div></div>}>
             <Routes>
-              <Route path="/" element={<CitizenPortal />} />
+              <Route path="/" element={<Home />} />
+              <Route path="/file-complaint" element={<CitizenPortal />} />
               <Route path="/officer/login" element={<OfficerLogin />} />
               <Route path="/officer/dashboard" element={<OfficerDashboard />} />
             </Routes>
