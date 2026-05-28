@@ -37,3 +37,6 @@ coverage/
 
 # Turbo
 .turbo/
+
+#plan
+GHMC_docs/
